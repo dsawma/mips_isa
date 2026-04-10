@@ -1,0 +1,20 @@
+#!/bin/sh
+
+CC = gcc
+CFLAGS = -g -ansi -pedantic-errors -Wall -Werror
+# On Mac, you will need to replace -ansi with -std=c90
+
+all:  asm sim-pipe
+
+asm:  asm.c
+	$(CC) $(CFLAGS) -c asm.c
+	$(CC) $(CFLAGS) -o asm asm.o
+	chmod u+x asm
+
+sim-pipe:  mips-small-pipe.c mips-small-pipe.h
+	$(CC) $(CFLAGS) -c mips-small-pipe.c
+	$(CC) $(CFLAGS) -o sim-pipe mips-small-pipe.o
+	chmod u+x sim-pipe
+
+clean:  
+	$(RM) *.o asm sim-pipe
