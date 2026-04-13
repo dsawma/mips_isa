@@ -67,6 +67,7 @@ void run(Pstate state)
     state_t new;
     int op_id, op_ex, op_mem, op_wb, rs, rt_wb, rt_id, rd, func_ex, result, struct_haz;
     int d_ex, d_mem, d_wb, i, rs_ex, rt_ex;
+    int de_mem, de_wb, de_end;
     int stage[3];
     int dests[3];
     int stage_ex[3];
@@ -179,19 +180,19 @@ void run(Pstate state)
             }
         }
 
-        d_mem = dests2[0];
-        d_wb = dests2[1];
-        d_end = dests2[2];
+        de_mem = dests2[0];
+        de_wb = dests2[1];
+        de_end = dests2[2];
 
         switch (field_r1(state->IDEX.instr))
         {
-        case d_mem:
+        case de_mem:
             rs_ex = state->EXMEM.aluResult;
             break;
-        case d_wb:
+        case de_wb:
             rs_ex = state->MEMWB.writeData;
             break;
-        case d_end:
+        case de_end:
             rs_ex = state->WBEND.writeData;
         default:
             rs_ex = state->IDEX.readRegA;
@@ -200,11 +201,11 @@ void run(Pstate state)
 
         switch (field_r2(state->IDEX.instr))
         {
-        case d_mem:
+        case de_mem:
             rt_ex = state->EXMEM.aluResult;
-        case d_wb:
+        case de_wb:
             rt_ex = state->MEMWB.writeData;
-        case d_end:
+        case de_end:
             rt_ex = state->WBEND.writeData;
         default:
             rt_ex = state->IDEX.readRegB;
