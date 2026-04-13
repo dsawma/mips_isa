@@ -1,2 +1,3 @@
 *.o
 *.machine
+sim-pipe
