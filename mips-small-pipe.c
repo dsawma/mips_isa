@@ -65,11 +65,9 @@ int main(int argc, char *argv[])
 void run(Pstate state)
 {
     state_t new;
-    int op_id, op_ex, op_mem, op_wb, rs, rt_wb, rt_id, rd, func_ex, result, struct_haz;
-    int d_ex, d_mem, d_wb, i, rs_ex, rt_ex;
+    int op_ex, op_mem, op_wb, rs, rt_wb, rt_id, rd, func_ex, result, haz, op_id;
+    int i, rs_ex, rt_ex;
     int de_mem, de_wb, de_end;
-    int stage[3];
-    int dests[3];
     int stage_ex[3];
     int dests2[3];
 
@@ -100,70 +98,35 @@ void run(Pstate state)
             new.IFID.pcPlus1 = state->pc + 4;
         }
         /* --------------------- ID stage --------------------- */
-        struct_haz = 0;
+        haz = 0;
         rs = field_r1(state->IFID.instr);
         rt_id = field_r2(state->IFID.instr);
         op_id = opcode(state->IFID.instr);
 
-        stage[0] = state->IDEX.instr;
-        stage[1] = state->EXMEM.instr;
-        stage[2] = state->MEMWB.instr;
-        for (i = 0; i < 3; i++)
+        new.IDEX.instr = state->IFID.instr;
+        new.IDEX.pcPlus1 = state->IFID.pcPlus1;
+        new.IDEX.readRegA = state->reg[rs];
+        new.IDEX.readRegB = state->reg[rt_id];
+        if (op_id == LW_OP || op_id == SW_OP || op_id == BEQZ_OP)
         {
-            switch (opcode(stage[i]))
-            {
-            case REG_REG_OP:
-                dests[i] = field_r3(stage[i]);
-                break;
-            case ADDI_OP:
-            case LW_OP:
-                dests[i] = field_r2(stage[i]);
-                break;
-            default:
-                dests[i] = 0;
-                break;
-            }
-        }
-        d_ex = dests[0];
-        d_mem = dests[1];
-        d_wb = dests[2];
-
-        if (rs != 0 && (rs == d_ex || rs == d_mem || rs == d_wb))
-        {
-            struct_haz = 1;
-        }
-        if (!struct_haz && op_id == REG_REG_OP && rt_id != 0 && (rt_id == d_ex || rt_id == d_mem || rt_id == d_wb))
-        {
-            struct_haz = 1;
-        }
-        if (struct_haz)
-        {
-            new.pc = state->pc;
-            new.IFID = state->IFID;
-            new.IDEX.instr = NOPINSTRUCTION;
-            new.IDEX.pcPlus1 = 0;
-            new.IDEX.readRegA = 0;
-            new.IDEX.readRegB = 0;
-            new.IDEX.offset = 0;
+            new.IDEX.offset = offset(state->IFID.instr);
         }
         else
         {
-            new.IDEX.instr = state->IFID.instr;
-            new.IDEX.pcPlus1 = state->IFID.pcPlus1;
-            new.IDEX.readRegA = state->reg[rs];
-            new.IDEX.readRegB = state->reg[rt_id];
-            new.IDEX.offset = offset(state->IFID.instr);
+            new.IDEX.offset = field_imm(state->IFID.instr);
         }
+
         /* --------------------- EX stage --------------------- */
         result = 0;
         op_ex = opcode(state->IDEX.instr);
         func_ex = func(state->IDEX.instr);
         rs_ex = 0;
         rt_ex = 0;
+        haz = 0;
 
-        stage_ex[0] = state->EXMEM.instr;
-        stage_ex[1] = state->MEMWB.instr;
-        stage_ex[2] = state->WBEND.instr;
+        stage_ex[0] = state->EXMEM.instr; /* stage_ex[0] will hold isntr in EXMEM reg*/
+        stage_ex[1] = state->MEMWB.instr; /* stage_ex[1] will hold isntr in MEMWB reg*/
+        stage_ex[2] = state->WBEND.instr; /* stage_ex[2] will hold isntr in WBEND reg*/
         for (i = 0; i < 3; i++)
         {
             switch (opcode(stage_ex[i]))
@@ -180,110 +143,164 @@ void run(Pstate state)
             }
         }
 
-        de_mem = dests2[0];
-        de_wb = dests2[1];
-        de_end = dests2[2];
+        de_mem = dests2[0]; /* de_mem holds destination reg from instr EXMEM */
+        de_wb = dests2[1];  /* de_wb holds destination reg from instr MEMWB */
+        de_end = dests2[2]; /* de_end holds destination reg from instr WBEND */
 
-        switch (field_r1(state->IDEX.instr))
+        /* rs value is forwarded if its in the pipeline regs, else its from its own readRegA */
+        if (field_r1(state->IDEX.instr) == de_mem)
         {
-        case de_mem:
             rs_ex = state->EXMEM.aluResult;
-            break;
-        case de_wb:
+        }
+        else if (field_r1(state->IDEX.instr) == de_wb)
+        {
             rs_ex = state->MEMWB.writeData;
-            break;
-        case de_end:
+        }
+        else if (field_r1(state->IDEX.instr) == de_end)
+        {
             rs_ex = state->WBEND.writeData;
-        default:
+        }
+        else
+        {
             rs_ex = state->IDEX.readRegA;
-            break;
         }
 
-        switch (field_r2(state->IDEX.instr))
+        /* rt value is forwarded if its in the pipeline regs, else its from its own readRegB */
+        if (field_r2(state->IDEX.instr) == de_mem)
         {
-        case de_mem:
             rt_ex = state->EXMEM.aluResult;
-        case de_wb:
+        }
+        else if (field_r2(state->IDEX.instr) == de_wb)
+        {
             rt_ex = state->MEMWB.writeData;
-        case de_end:
+        }
+        else if (field_r2(state->IDEX.instr) == de_end)
+        {
             rt_ex = state->WBEND.writeData;
-        default:
+        }
+        else
+        {
             rt_ex = state->IDEX.readRegB;
         }
 
         if (op_ex == REG_REG_OP)
         {
+            /* if the instr is a reg_reg_op then we check if its s or t reg is from the destination of a lw instr in EXMEM  */
+            /* if it is we stall */
+            if ((opcode(stage_ex[0]) == LW_OP && de_mem == field_r1(state->IDEX.instr)) || (opcode(stage_ex[0]) == LW_OP && de_mem == field_r2(state->IDEX.instr)))
+            {
+                haz = 1;
+            }
+            else
+            {
 
-            if (func_ex == ADD_FUNC)
-            {
-                result = rs_ex + rt_ex;
-                if (field_r3(state->IDEX.instr) == 0)
+                if (func_ex == ADD_FUNC)
                 {
-                    result = 0;
+                    result = rs_ex + rt_ex;
+                    if (field_r3(state->IDEX.instr) == 0)
+                    {
+                        result = 0;
+                    }
                 }
-            }
-            else if (func_ex == SUB_FUNC)
-            {
-                result = state->IDEX.readRegA - state->IDEX.readRegB;
-                if (field_r3(state->IDEX.instr) == 0)
+                else if (func_ex == SUB_FUNC)
                 {
-                    result = 0;
+                    result = rs_ex - rt_ex;
+                    if (field_r3(state->IDEX.instr) == 0)
+                    {
+                        result = 0;
+                    }
                 }
-            }
-            else if (func_ex == SLL_FUNC)
-            {
-                result = state->IDEX.readRegB << ((state->IDEX.instr >> 6) & 0x1F);
-                if (field_r3(state->IDEX.instr) == 0)
+                else if (func_ex == SLL_FUNC)
                 {
-                    result = 0;
+                    result = rt_ex << ((state->IDEX.instr >> 6) & 0x1F);
+                    if (field_r3(state->IDEX.instr) == 0)
+                    {
+                        result = 0;
+                    }
                 }
-            }
-            else if (func_ex == SRL_FUNC)
-            {
-                result = state->IDEX.readRegB >> ((state->IDEX.instr >> 6) & 0x1F);
-                if (field_r3(state->IDEX.instr) == 0)
+                else if (func_ex == SRL_FUNC)
                 {
-                    result = 0;
+                    result = rt_ex >> ((state->IDEX.instr >> 6) & 0x1F);
+                    if (field_r3(state->IDEX.instr) == 0)
+                    {
+                        result = 0;
+                    }
                 }
-            }
-            else if (func_ex == AND_FUNC)
-            {
-                result = state->IDEX.readRegA & state->IDEX.readRegB;
-                if (field_r3(state->IDEX.instr) == 0)
+                else if (func_ex == AND_FUNC)
                 {
-                    result = 0;
+                    result = rs_ex & rt_ex;
+                    if (field_r3(state->IDEX.instr) == 0)
+                    {
+                        result = 0;
+                    }
                 }
-            }
-            else if (func_ex == OR_FUNC)
-            {
-                result = state->IDEX.readRegA | state->IDEX.readRegB;
-                if (field_r3(state->IDEX.instr) == 0)
+                else if (func_ex == OR_FUNC)
                 {
-                    result = 0;
+                    result = rs_ex | rt_ex;
+                    if (field_r3(state->IDEX.instr) == 0)
+                    {
+                        result = 0;
+                    }
                 }
             }
         }
         else if (op_ex == ADDI_OP || op_ex == LW_OP || op_ex == SW_OP)
         {
-            result = state->IDEX.readRegA + state->IDEX.offset;
+            /* we check if its s reg is from the destination of a lw instr in EXMEM  */
+            /* if it is we stall */
+            if ((opcode(stage_ex[0]) == LW_OP && de_mem == field_r1(state->IDEX.instr)))
+            {
+                haz = 1;
+            }
+            else
+            {
+                result = rs_ex + state->IDEX.offset;
+            }
         }
         else if (op_ex == BEQZ_OP)
         {
-            result = state->IDEX.pcPlus1 + (state->IDEX.offset);
-            new.pc = result;
-            if (state->IDEX.readRegA != 0)
+            /* we check if its s reg is from the destination of a lw instr in EXMEM */
+            /* if it is we stall */
+            if ((opcode(stage_ex[0]) == LW_OP && de_mem == field_r1(state->IDEX.instr)))
             {
-                result = state->IDEX.pcPlus1;
+                haz = 1;
+            }
+            else
+            {
+                result = state->IDEX.pcPlus1 + (state->IDEX.offset);
+                new.pc = result;
+                if (state->IDEX.readRegA != 0)
+                {
+                    result = state->IDEX.pcPlus1;
+                }
             }
         }
         else
         {
             result = 0;
         }
-
-        new.EXMEM.instr = state->IDEX.instr;
-        new.EXMEM.aluResult = result;
-        new.EXMEM.readRegB = state->IDEX.readRegB;
+        if (haz)
+        {
+            new.IDEX = state->IDEX;
+            new.EXMEM.instr = NOPINSTRUCTION;
+            new.EXMEM.aluResult = 0;
+            new.EXMEM.readRegB = 0;
+        }
+        else
+        {
+            if (opcode(state->IDEX.instr) == HALT_OP)
+            {
+                new.EXMEM.instr = state->IDEX.instr;
+                new.EXMEM.aluResult = result;
+                new.EXMEM.readRegB = 0;
+            }
+            else
+            {
+                new.EXMEM.instr = state->IDEX.instr;
+                new.EXMEM.aluResult = result;
+                new.EXMEM.readRegB = rt_ex;
+            }
+        }
         /* --------------------- MEM stage --------------------- */
         op_mem = opcode(state->EXMEM.instr);
         if (op_mem == REG_REG_OP)
@@ -322,7 +339,7 @@ void run(Pstate state)
         else if (op_mem == SW_OP)
         {
             new.dataMem[state->EXMEM.aluResult / 4] = state->EXMEM.readRegB;
-            new.MEMWB.writeData = 0;
+            new.MEMWB.writeData = state->EXMEM.readRegB;
         }
         else if (op_mem == BEQZ_OP)
         {
