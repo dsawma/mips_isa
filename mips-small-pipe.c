@@ -77,6 +77,10 @@ void run(Pstate state)
     {
 
         printState(state);
+        printInstruction(state->EXMEM.instr);
+        printInstruction(state->MEMWB.instr);
+        printInstruction(state->WBEND.instr);
+        printf("cycle: %d, EXMEM.aluResult =%d, MEMWB.writeData = %d, WBEND.writeData = %d\n", state->cycles, state->EXMEM.aluResult, state->MEMWB.writeData, state->WBEND.writeData);
 
         /* copy everything so all we have to do is make changes.
            (this is primarily for the memory and reg arrays) */
@@ -97,6 +101,7 @@ void run(Pstate state)
             new.pc = state->pc + 4;
             new.IFID.pcPlus1 = state->pc + 4;
         }
+
         /* --------------------- ID stage --------------------- */
         haz = 0;
         rs = field_r1(state->IFID.instr);
@@ -135,6 +140,7 @@ void run(Pstate state)
             {
             case REG_REG_OP:
                 dests2[i] = field_r3(stage_ex[i]);
+                break;
             case ADDI_OP:
             case LW_OP:
                 dests2[i] = field_r2(stage_ex[i]);
@@ -150,6 +156,7 @@ void run(Pstate state)
         de_end = dests2[2]; /* de_end holds destination reg from instr WBEND */
 
         /* rs value is forwarded if its in the pipeline regs, else its from its own readRegA */
+
         if (field_r1(state->IDEX.instr) == de_mem)
         {
             rs_ex = state->EXMEM.aluResult;
@@ -168,6 +175,7 @@ void run(Pstate state)
         }
 
         /* rt value is forwarded if its in the pipeline regs, else its from its own readRegB */
+
         if (field_r2(state->IDEX.instr) == de_mem)
         {
             rt_ex = state->EXMEM.aluResult;
@@ -296,6 +304,12 @@ void run(Pstate state)
                 new.EXMEM.aluResult = result;
                 new.EXMEM.readRegB = 0;
             }
+            else if (opcode(state->IDEX.instr == SW_OP))
+            {
+                new.EXMEM.instr = state->IDEX.instr;
+                new.EXMEM.aluResult = result;
+                new.EXMEM.readRegB = rs;
+            }
             else
             {
                 new.EXMEM.instr = state->IDEX.instr;
@@ -303,6 +317,7 @@ void run(Pstate state)
                 new.EXMEM.readRegB = rt_ex;
             }
         }
+
         /* --------------------- MEM stage --------------------- */
         op_mem = opcode(state->EXMEM.instr);
         if (op_mem == REG_REG_OP)
