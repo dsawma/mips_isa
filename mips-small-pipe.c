@@ -127,6 +127,8 @@ void run(Pstate state)
         stage_ex[0] = state->EXMEM.instr; /* stage_ex[0] will hold isntr in EXMEM reg*/
         stage_ex[1] = state->MEMWB.instr; /* stage_ex[1] will hold isntr in MEMWB reg*/
         stage_ex[2] = state->WBEND.instr; /* stage_ex[2] will hold isntr in WBEND reg*/
+
+        /* loops through each pipelipe reg from stage_ex, then identifies the destination reg */
         for (i = 0; i < 3; i++)
         {
             switch (opcode(stage_ex[i]))
