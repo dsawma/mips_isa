@@ -77,10 +77,6 @@ void run(Pstate state)
     {
 
         printState(state);
-        printInstruction(state->EXMEM.instr);
-        printInstruction(state->MEMWB.instr);
-        printInstruction(state->WBEND.instr);
-        printf("cycle: %d, EXMEM.aluResult =%d, MEMWB.writeData = %d, WBEND.writeData = %d\n", state->cycles, state->EXMEM.aluResult, state->MEMWB.writeData, state->WBEND.writeData);
 
         /* copy everything so all we have to do is make changes.
            (this is primarily for the memory and reg arrays) */
@@ -108,17 +104,58 @@ void run(Pstate state)
         rt_id = field_r2(state->IFID.instr);
         op_id = opcode(state->IFID.instr);
 
-        new.IDEX.instr = state->IFID.instr;
-        new.IDEX.pcPlus1 = state->IFID.pcPlus1;
-        new.IDEX.readRegA = state->reg[rs];
-        new.IDEX.readRegB = state->reg[rt_id];
-        if (op_id == LW_OP || op_id == SW_OP || op_id == BEQZ_OP)
+        if (opcode(state->IDEX.instr) == LW_OP)
         {
-            new.IDEX.offset = offset(state->IFID.instr);
+            if (op_id == REG_REG_OP && (rs == field_r2(state->IDEX.instr) || rt_id == field_r2(state->IDEX.instr)))
+            {
+                new.pc = state->pc;
+                new.IFID = state->IFID;
+                new.IDEX.instr = NOPINSTRUCTION;
+                new.IDEX.pcPlus1 = 0;
+                new.IDEX.readRegA = 0;
+                new.IDEX.readRegB = 0;
+                new.IDEX.offset = 0;
+            }
+            else if (rt_id == field_r2(state->IDEX.instr))
+            {
+                new.pc = state->pc;
+                new.IFID = state->IFID;
+                new.IDEX.instr = NOPINSTRUCTION;
+                new.IDEX.pcPlus1 = 0;
+                new.IDEX.readRegA = 0;
+                new.IDEX.readRegB = 0;
+                new.IDEX.offset = 0;
+            }
+            else
+            {
+                new.IDEX.instr = state->IFID.instr;
+                new.IDEX.pcPlus1 = state->IFID.pcPlus1;
+                new.IDEX.readRegA = state->reg[rs];
+                new.IDEX.readRegB = state->reg[rt_id];
+                if (op_id == LW_OP || op_id == SW_OP || op_id == BEQZ_OP)
+                {
+                    new.IDEX.offset = offset(state->IFID.instr);
+                }
+                else
+                {
+                    new.IDEX.offset = field_imm(state->IFID.instr);
+                }
+            }
         }
         else
         {
-            new.IDEX.offset = field_imm(state->IFID.instr);
+            new.IDEX.instr = state->IFID.instr;
+            new.IDEX.pcPlus1 = state->IFID.pcPlus1;
+            new.IDEX.readRegA = state->reg[rs];
+            new.IDEX.readRegB = state->reg[rt_id];
+            if (op_id == LW_OP || op_id == SW_OP || op_id == BEQZ_OP)
+            {
+                new.IDEX.offset = offset(state->IFID.instr);
+            }
+            else
+            {
+                new.IDEX.offset = field_imm(state->IFID.instr);
+            }
         }
 
         /* --------------------- EX stage --------------------- */
@@ -222,7 +259,7 @@ void run(Pstate state)
                 }
                 else if (func_ex == SLL_FUNC)
                 {
-                    result = rt_ex << ((state->IDEX.instr >> 6) & 0x1F);
+                    result = rs_ex << rt_ex;
                     if (field_r3(state->IDEX.instr) == 0)
                     {
                         result = 0;
@@ -230,7 +267,7 @@ void run(Pstate state)
                 }
                 else if (func_ex == SRL_FUNC)
                 {
-                    result = rt_ex >> ((state->IDEX.instr >> 6) & 0x1F);
+                    result = rs_ex >> rt_ex;
                     if (field_r3(state->IDEX.instr) == 0)
                     {
                         result = 0;
