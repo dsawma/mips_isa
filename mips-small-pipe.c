@@ -92,32 +92,30 @@ void run(Pstate state)
             new.IFID.pcPlus1 = state->IFID.pcPlus1;
         }
         /* positive offset, Branch Taken */
-        else if (offset(state->IDEX.instr) > -1 && opcode(state->IDEX.instr) == BEQZ_OP && field_r1(state->IDEX.instr) == 0)
+        else if (offset(state->IDEX.instr) > -1 && opcode(state->IDEX.instr) == BEQZ_OP && state->reg[field_r1(state->IDEX.instr)] == 0)
         {
-            new.pc = state->pc;
+            new.pc = state->pc + 4;
             new.IFID.instr = NOPINSTRUCTION;
             new.IFID.pcPlus1 = 0;
         }
         /* negative offset, Branch Not taken */
-        else if (offset(state->IDEX.instr) < 0 && opcode(state->IDEX.instr) == BEQZ_OP && field_r1(state->IDEX.instr) != 0)
+        else if (offset(state->IDEX.instr) < 0 && opcode(state->IDEX.instr) == BEQZ_OP && state->reg[field_r1(state->IDEX.instr)] != 0)
         {
-            new.pc = state->pc;
+            new.pc = state->pc + 4;
             new.IFID.instr = NOPINSTRUCTION;
             new.IFID.pcPlus1 = 0;
         }
         else
         {
+            new.IFID.instr = state->instrMem[state->pc / 4];
             /* IF BRANCH has negative offset, we fetch the target address */
-            if (opcode(state->IFID.instr) == BEQZ_OP && field_imm(state->IFID.instr) < 0)
+            if ((opcode(state->instrMem[state->pc / 4]) == BEQZ_OP) && (offset(state->instrMem[state->pc / 4]) < 0))
             {
-
-                new.IFID.instr = state->instrMem[state->IFID.pcPlus1 + offset(state->IFID.instr) / 4];
-                new.pc = state->IFID.pcPlus1 + offset(state->IFID.instr);
-                new.IFID.pcPlus1 = state->IFID.pcPlus1 + offset(state->IFID.instr);
+                new.pc = (state->IFID.pcPlus1 + offset(state->instrMem[state->pc / 4])) + 4;
+                new.IFID.pcPlus1 = state->pc + 4;
             }
             else /* fetch sequential instr or if BRANCH positive offset*/
             {
-                new.IFID.instr = state->instrMem[state->pc / 4];
                 new.pc = state->pc + 4;
                 new.IFID.pcPlus1 = state->pc + 4;
             }
@@ -130,21 +128,21 @@ void run(Pstate state)
         op_id = opcode(state->IFID.instr);
 
         /* positive offset, Branch Taken */
-        if (offset(state->IDEX.instr) > -1 && opcode(state->IDEX.instr) == BEQZ_OP && field_r1(state->IDEX.instr) == 0)
+        if (offset(state->IDEX.instr) > -1 && opcode(state->IDEX.instr) == BEQZ_OP && state->reg[field_r1(state->IDEX.instr)] == 0)
         {
             new.IDEX.instr = NOPINSTRUCTION;
             new.IDEX.pcPlus1 = 0;
             new.IDEX.readRegA = 0;
             new.IDEX.readRegB = 0;
-            new.IDEX.offset = 32;
+            new.IDEX.offset = 0;
         }
-        else if (offset(state->IDEX.instr) < 0 && opcode(state->IDEX.instr) == BEQZ_OP && field_r1(state->IDEX.instr) != 0)
+        else if (offset(state->IDEX.instr) < 0 && opcode(state->IDEX.instr) == BEQZ_OP && state->reg[field_r1(state->IDEX.instr)] != 0)
         {
             new.IDEX.instr = NOPINSTRUCTION;
             new.IDEX.pcPlus1 = 0;
             new.IDEX.readRegA = 0;
             new.IDEX.readRegB = 0;
-            new.IDEX.offset = 32;
+            new.IDEX.offset = 0;
         }
         else if (opcode(state->IDEX.instr) == LW_OP)
         {
@@ -336,6 +334,11 @@ void run(Pstate state)
             new.EXMEM.instr = state->IDEX.instr;
             new.EXMEM.aluResult = result;
             new.EXMEM.readRegB = rt_ex;
+            if (field_r2(state->IDEX.instr) == 0)
+            {
+                new.EXMEM.readRegB = 0;
+            }
+
             break;
         case ADDI_OP:
             if (field_r1(state->IDEX.instr) == 0)
