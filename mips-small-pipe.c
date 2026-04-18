@@ -65,11 +65,12 @@ int main(int argc, char *argv[])
 void run(Pstate state)
 {
     state_t new;
-    int op_ex, rs, rt_wb, rt_id, rd, func_ex, result, op_id;
+
+    /* only used in EX stage */
     int i, rs_ex, rt_ex;
     int de_mem, de_wb, de_end;
     int stage_ex[3];
-    int dests2[3];
+    int dests[3];
 
     memset(&new, 0, sizeof(state_t));
 
@@ -96,13 +97,16 @@ void run(Pstate state)
 
         /* fetch next instruction */
         new.IFID.instr = state->instrMem[state->pc / 4];
-        /* If fetched instr was a BRANCH with negative offset, we fetch the target address */
+
+        /* If fetched instr was a BRANCH with negative offset, we set new pc to the target address */
         if ((opcode(state->instrMem[state->pc / 4]) == BEQZ_OP) && (offset(state->instrMem[state->pc / 4]) < 0))
         {
             new.pc = (state->IFID.pcPlus1 + offset(state->instrMem[state->pc / 4])) + 4;
             new.IFID.pcPlus1 = state->pc + 4;
         }
-        else /* fetch sequential instr or if BRANCH positive offset */
+
+        /* fetch sequential instr or if BRANCH positive offset */
+        else
         {
             new.pc = state->pc + 4;
             new.IFID.pcPlus1 = state->pc + 4;
@@ -110,13 +114,11 @@ void run(Pstate state)
 
         /* --------------------- ID stage --------------------- */
 
-        rs = field_r1(state->IFID.instr);
-        rt_id = field_r2(state->IFID.instr);
-        op_id = opcode(state->IFID.instr);
-
+        /* if previous instr was LW -> check for true dependency, if so stall */
         if (opcode(state->IDEX.instr) == LW_OP)
         {
-            if (op_id == REG_REG_OP && (rs == field_r2(state->IDEX.instr) || rt_id == field_r2(state->IDEX.instr)))
+            /* if the instr is REG_REG and either rs or rt is dependent on LW's rt -> stall */
+            if (opcode(state->IFID.instr) == REG_REG_OP && (field_r1(state->IFID.instr) == field_r2(state->IDEX.instr) || field_r2(state->IFID.instr) == field_r2(state->IDEX.instr)))
             {
                 new.pc = state->pc;
                 new.IFID = state->IFID;
@@ -126,7 +128,9 @@ void run(Pstate state)
                 new.IDEX.readRegB = 0;
                 new.IDEX.offset = 0;
             }
-            else if (rs == field_r2(state->IDEX.instr))
+
+            /* else if the instr rs is dependent on LW's rt -> stall */
+            else if (field_r1(state->IFID.instr) == field_r2(state->IDEX.instr))
             {
                 new.pc = state->pc;
                 new.IFID = state->IFID;
@@ -136,13 +140,15 @@ void run(Pstate state)
                 new.IDEX.readRegB = 0;
                 new.IDEX.offset = 0;
             }
+
+            /* not dependent */
             else
             {
                 new.IDEX.instr = state->IFID.instr;
                 new.IDEX.pcPlus1 = state->IFID.pcPlus1;
-                new.IDEX.readRegA = state->reg[rs];
-                new.IDEX.readRegB = state->reg[rt_id];
-                if (op_id == LW_OP || op_id == SW_OP || op_id == BEQZ_OP)
+                new.IDEX.readRegA = state->reg[field_r1(state->IFID.instr)];
+                new.IDEX.readRegB = state->reg[field_r2(state->IFID.instr)];
+                if (opcode(state->IFID.instr) == LW_OP || opcode(state->IFID.instr) == SW_OP || opcode(state->IFID.instr) == BEQZ_OP || opcode(state->IFID.instr) == ADDI_OP)
                 {
                     new.IDEX.offset = offset(state->IFID.instr);
                 }
@@ -152,14 +158,16 @@ void run(Pstate state)
                 }
             }
         }
+
+        /* when the previous instr is not LW */
         else
         {
             new.IDEX.instr = state->IFID.instr;
             new.IDEX.pcPlus1 = state->IFID.pcPlus1;
-            new.IDEX.readRegA = state->reg[rs];
-            new.IDEX.readRegB = state->reg[rt_id];
+            new.IDEX.readRegA = state->reg[field_r1(state->IFID.instr)];
+            new.IDEX.readRegB = state->reg[field_r2(state->IFID.instr)];
 
-            if (op_id == LW_OP || op_id == SW_OP || op_id == BEQZ_OP)
+            if (opcode(state->IFID.instr) == LW_OP || opcode(state->IFID.instr) == SW_OP || opcode(state->IFID.instr) == BEQZ_OP || opcode(state->IFID.instr) == ADDI_OP)
             {
                 new.IDEX.offset = offset(state->IFID.instr);
             }
@@ -170,16 +178,12 @@ void run(Pstate state)
         }
 
         /* --------------------- EX stage --------------------- */
-
-        op_ex = opcode(state->IDEX.instr);
-        func_ex = func(state->IDEX.instr);
         rs_ex = 0;
         rt_ex = 0;
-        result = 0;
 
-        stage_ex[0] = state->EXMEM.instr; /* stage_ex[0] will hold isntr in EXMEM reg*/
-        stage_ex[1] = state->MEMWB.instr; /* stage_ex[1] will hold isntr in MEMWB reg*/
-        stage_ex[2] = state->WBEND.instr; /* stage_ex[2] will hold isntr in WBEND reg*/
+        stage_ex[0] = state->EXMEM.instr; /* stage_ex[0] will hold instr in EXMEM reg*/
+        stage_ex[1] = state->MEMWB.instr; /* stage_ex[1] will hold instr in MEMWB reg*/
+        stage_ex[2] = state->WBEND.instr; /* stage_ex[2] will hold instr in WBEND reg*/
 
         /* loops through each pipelipe reg from stage_ex, then identifies the destination reg */
         for (i = 0; i < 3; i++)
@@ -187,24 +191,23 @@ void run(Pstate state)
             switch (opcode(stage_ex[i]))
             {
             case REG_REG_OP:
-                dests2[i] = field_r3(stage_ex[i]);
+                dests[i] = field_r3(stage_ex[i]);
                 break;
             case ADDI_OP:
             case LW_OP:
-                dests2[i] = field_r2(stage_ex[i]);
+                dests[i] = field_r2(stage_ex[i]);
                 break;
             default:
-                dests2[i] = 0;
+                dests[i] = 0;
                 break;
             }
         }
 
-        de_mem = dests2[0]; /* de_mem holds destination reg from instr EXMEM */
-        de_wb = dests2[1];  /* de_wb holds destination reg from instr MEMWB */
-        de_end = dests2[2]; /* de_end holds destination reg from instr WBEND */
+        de_mem = dests[0]; /* de_mem holds destination reg from instr EXMEM */
+        de_wb = dests[1];  /* de_wb holds destination reg from instr MEMWB */
+        de_end = dests[2]; /* de_end holds destination reg from instr WBEND */
 
         /* rs value is forwarded if its in the pipeline regs, else its from its own readRegA */
-
         if (field_r1(state->IDEX.instr) == de_mem)
         {
             rs_ex = state->EXMEM.aluResult;
@@ -223,7 +226,6 @@ void run(Pstate state)
         }
 
         /* rt value is forwarded if its in the pipeline regs, else its from its own readRegB */
-
         if (field_r2(state->IDEX.instr) == de_mem)
         {
             rt_ex = state->EXMEM.aluResult;
@@ -240,66 +242,66 @@ void run(Pstate state)
         {
             rt_ex = state->IDEX.readRegB;
         }
-        switch (op_ex)
+
+        /* performs computation based on opcode */
+        /* if the destination reg is r0 the aluResult is 0 */
+        switch (opcode(state->IDEX.instr))
         {
         case REG_REG_OP:
-            if (func_ex == ADD_FUNC)
+            switch (func(state->IDEX.instr))
             {
-                result = rs_ex + rt_ex;
+            case ADD_FUNC:
+                new.EXMEM.aluResult = rs_ex + rt_ex;
                 if (field_r3(state->IDEX.instr) == 0)
                 {
-                    result = 0;
+                    new.EXMEM.aluResult = 0;
                 }
-            }
-            else if (func_ex == SUB_FUNC)
-            {
-                result = rs_ex - rt_ex;
+                break;
+            case SUB_FUNC:
+                new.EXMEM.aluResult = rs_ex - rt_ex;
                 if (field_r3(state->IDEX.instr) == 0)
                 {
-                    result = 0;
+                    new.EXMEM.aluResult = 0;
                 }
-            }
-            else if (func_ex == SLL_FUNC)
-            {
-                result = rs_ex << rt_ex;
+                break;
+            case SLL_FUNC:
+                new.EXMEM.aluResult = rs_ex << rt_ex;
                 if (field_r3(state->IDEX.instr) == 0)
                 {
-                    result = 0;
+                    new.EXMEM.aluResult = 0;
                 }
-            }
-            else if (func_ex == SRL_FUNC)
-            {
-                result = rs_ex >> rt_ex;
+                break;
+            case SRL_FUNC:
+                new.EXMEM.aluResult = rs_ex >> rt_ex;
                 if (field_r3(state->IDEX.instr) == 0)
                 {
-                    result = 0;
+                    new.EXMEM.aluResult = 0;
                 }
-            }
-            else if (func_ex == AND_FUNC)
-            {
-                result = rs_ex & rt_ex;
+                break;
+            case AND_FUNC:
+                new.EXMEM.aluResult = rs_ex & rt_ex;
                 if (field_r3(state->IDEX.instr) == 0)
                 {
-                    result = 0;
+                    new.EXMEM.aluResult = 0;
                 }
-            }
-            else if (func_ex == OR_FUNC)
-            {
-                result = rs_ex | rt_ex;
+                break;
+            case OR_FUNC:
+                new.EXMEM.aluResult = rs_ex | rt_ex;
                 if (field_r3(state->IDEX.instr) == 0)
                 {
-                    result = 0;
+                    new.EXMEM.aluResult = 0;
                 }
+                break;
+            default:
+                new.EXMEM.aluResult = 0;
             }
 
             new.EXMEM.instr = state->IDEX.instr;
-            new.EXMEM.aluResult = result;
             new.EXMEM.readRegB = rt_ex;
             if (field_r2(state->IDEX.instr) == 0)
             {
                 new.EXMEM.readRegB = 0;
             }
-
             break;
         case ADDI_OP:
             if (field_r1(state->IDEX.instr) == 0)
@@ -307,14 +309,12 @@ void run(Pstate state)
                 rs_ex = 0;
             }
 
-            result = rs_ex + state->IDEX.offset;
-
+            new.EXMEM.aluResult = rs_ex + state->IDEX.offset;
             if (field_r2(state->IDEX.instr) == 0)
             {
-                result = 0;
+                new.EXMEM.aluResult = 0;
             }
             new.EXMEM.instr = state->IDEX.instr;
-            new.EXMEM.aluResult = result;
             new.EXMEM.readRegB = state->IDEX.readRegB;
             break;
         case LW_OP:
@@ -323,14 +323,13 @@ void run(Pstate state)
                 rs_ex = 0;
             }
 
-            result = rs_ex + state->IDEX.offset;
-
+            new.EXMEM.aluResult = rs_ex + state->IDEX.offset;
             if (field_r2(state->IDEX.instr) == 0)
             {
-                result = 0;
+                new.EXMEM.aluResult = 0;
             }
             new.EXMEM.instr = state->IDEX.instr;
-            new.EXMEM.aluResult = result;
+            ;
             new.EXMEM.readRegB = state->IDEX.readRegB;
             break;
 
@@ -342,25 +341,28 @@ void run(Pstate state)
                 rs_ex = 0;
             }
 
-            result = rs_ex + state->IDEX.offset;
+            new.EXMEM.aluResult = rs_ex + state->IDEX.offset;
 
             if (field_r2(state->IDEX.instr) == 0)
             {
-                result = 0;
+                new.EXMEM.aluResult = 0;
             }
 
             new.EXMEM.instr = state->IDEX.instr;
-            new.EXMEM.aluResult = result;
             new.EXMEM.readRegB = rt_ex;
-
             break;
         case BEQZ_OP:
 
             /* the offset is positive, branch taken OR offset is negative, branch is not-taken */
+            /* If rs is r0, rs_ex should stay 0 */
+            if (field_r1(state->IDEX.instr) == 0)
+            {
+                rs_ex = 0;
+            }
             if ((state->IDEX.offset > -1 && rs_ex == 0) || (state->IDEX.offset < 0 && rs_ex != 0))
             {
-                result = state->IDEX.pcPlus1 + state->IDEX.offset;
-                new.pc = result;
+                new.EXMEM.aluResult = state->IDEX.pcPlus1 + state->IDEX.offset;
+                new.pc = state->IDEX.pcPlus1 + state->IDEX.offset;
 
                 new.IFID.instr = NOPINSTRUCTION;
                 new.IFID.pcPlus1 = 0;
@@ -373,46 +375,25 @@ void run(Pstate state)
             }
             else
             {
-                result = state->IDEX.pcPlus1 + state->IDEX.offset;
+                new.EXMEM.aluResult = state->IDEX.pcPlus1 + state->IDEX.offset;
             }
             new.EXMEM.instr = state->IDEX.instr;
-            new.EXMEM.aluResult = result;
             new.EXMEM.readRegB = state->IDEX.readRegB;
 
             break;
         case HALT_OP:
             new.EXMEM.instr = state->IDEX.instr;
-            new.EXMEM.aluResult = result;
+            new.EXMEM.aluResult = 0;
             new.EXMEM.readRegB = 0;
             break;
-        default:
-            result = 0;
         }
 
         /* --------------------- MEM stage --------------------- */
 
+        /* if its LW instr -> writeData is dataMem of the aluResult */
+        /* if its SW instr -> readRegB is saved into dataMem of aluResult*/
         switch (opcode(state->EXMEM.instr))
         {
-        case REG_REG_OP:
-            if (0 == field_r3(state->EXMEM.instr))
-            {
-                new.MEMWB.writeData = 0;
-            }
-            else
-            {
-                new.MEMWB.writeData = state->EXMEM.aluResult;
-            }
-            break;
-        case ADDI_OP:
-            if (0 == field_r2(state->EXMEM.instr))
-            {
-                new.MEMWB.writeData = 0;
-            }
-            else
-            {
-                new.MEMWB.writeData = state->EXMEM.aluResult;
-            }
-            break;
         case LW_OP:
             if (0 == field_r2(state->EXMEM.instr))
             {
@@ -427,32 +408,29 @@ void run(Pstate state)
             new.dataMem[state->EXMEM.aluResult / 4] = state->EXMEM.readRegB;
             new.MEMWB.writeData = state->EXMEM.readRegB;
             break;
-        case BEQZ_OP:
-            new.MEMWB.writeData = state->EXMEM.aluResult;
-            break;
         default:
             new.MEMWB.writeData = state->EXMEM.aluResult;
         }
         new.MEMWB.instr = state->EXMEM.instr;
 
         /* --------------------- WB stage --------------------- */
+
+        /* update register file only if the destination is not r0 */
         switch (opcode(state->MEMWB.instr))
         {
         case REG_REG_OP:
-            rd = field_r3(state->MEMWB.instr);
-            if (rd != 0)
+            if (field_r3(state->MEMWB.instr) != 0)
             {
-                new.reg[rd] = state->MEMWB.writeData;
+                new.reg[field_r3(state->MEMWB.instr)] = state->MEMWB.writeData;
             }
             new.WBEND.instr = state->MEMWB.instr;
             new.WBEND.writeData = state->MEMWB.writeData;
             break;
         case ADDI_OP:
         case LW_OP:
-            rt_wb = field_r2(state->MEMWB.instr);
-            if (rt_wb != 0)
+            if (field_r2(state->MEMWB.instr) != 0)
             {
-                new.reg[rt_wb] = state->MEMWB.writeData;
+                new.reg[field_r2(state->MEMWB.instr)] = state->MEMWB.writeData;
             }
             new.WBEND.instr = state->MEMWB.instr;
             new.WBEND.writeData = state->MEMWB.writeData;
@@ -464,7 +442,7 @@ void run(Pstate state)
 
         /* --------------------- end stage --------------------- */
 
-        if (opcode(new.WBEND.instr) == HALT_OP)
+        if (opcode(state->MEMWB.instr) == HALT_OP)
         {
             printf("machine halted\n");
             printf("total of %d cycles executed\n", new.cycles - 1);
