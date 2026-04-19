@@ -1,3 +1,4 @@
 *.o
 *.machine
 sim-pipe
+asm
